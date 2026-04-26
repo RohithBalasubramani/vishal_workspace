@@ -636,6 +636,7 @@ def save_products(products):
     except Exception as e:
         conn.rollback()
         print(f"  [Save] DB error: {e}")
+        raise
     finally:
         conn.close()
 
@@ -664,7 +665,21 @@ def process_catalog(file_path, brand_hint=None, level="detailed", categories=Non
     text, tables, dt, method, file_type, num_pages = pdf_process(abs_path)
 
     products = extract_from_tables(tables, filename, brand_hint, level=level, categories=categories)
-    inserted, skipped = save_products(products)
+
+    try:
+        inserted, skipped = save_products(products)
+    except Exception as e:
+        print(f"  [Pipeline] Save failed for {filename}, file NOT marked as processed: {e}")
+        return {
+            "filename": filename,
+            "extracted": len(products),
+            "inserted": 0,
+            "skipped": 0,
+            "images_linked": 0,
+            "method": method,
+            "time": dt,
+            "error": str(e),
+        }
 
     images = extract_images_from_pdf(abs_path)
     linked = link_images_to_products(images, filename, pdf_path=abs_path)

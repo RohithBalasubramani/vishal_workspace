@@ -20,7 +20,7 @@ def run_ui(port=7862):
     from app.ui import create_app
     demo = create_app()
     image_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "images")
-    demo.launch(server_name="0.0.0.0", server_port=port, share=False, allowed_paths=[image_dir])
+    demo.launch(server_name="127.0.0.1", server_port=port, share=False, allowed_paths=[image_dir])
 
 
 def run_extract(pdf_path, brand=None):

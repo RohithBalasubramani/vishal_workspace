@@ -217,26 +217,13 @@ def process_and_preview(file_path, level, category_filter, page_range):
     # Check if this file was already processed
     already_done, prev_record = is_file_processed(file_path)
 
-    # Auto-save extracted products to mitsubishi_test (main DB)
-    # Only new products and new specs are added — no duplicates
-    from pipeline.catalog_extractor import save_products
-    from pipeline.image_extractor import extract_images_from_pdf, link_images_to_products
-
-    new_count, existing_count = save_products(products)
-    images = extract_images_from_pdf(file_path)
-    linked = link_images_to_products(images, fname, pdf_path=file_path)
-    mark_file_processed(file_path, fname,
-                        products_inserted=new_count,
-                        products_skipped=existing_count,
-                        images_linked=linked)
-
     reprocess_note = ""
     if already_done:
-        reprocess_note = f"\n- **Re-processed:** only new data added (file was previously processed on {prev_record.get('processed_at', 'N/A')})"
+        reprocess_note = f"\n- **Note:** file was previously processed on {prev_record.get('processed_at', 'N/A')}"
 
     df = _build_preview_df(products, level_key)
 
-    # Cache for user edits
+    # Cache for user review — NOT saved to DB until explicit approval
     _preview_cache[fname] = {
         "products": products,
         "file_path": file_path,
@@ -247,13 +234,11 @@ def process_and_preview(file_path, level, category_filter, page_range):
     }
 
     yield (
-        f"**Saved to Database!** {len(products)} products extracted at **{level_key}** level.\n"
-        f"- **New products:** {new_count}\n"
-        f"- **Already existing (skipped):** {existing_count}\n"
-        f"- **Images:** {len(images)} extracted, {linked} linked"
+        f"**Preview Ready!** {len(products)} products extracted at **{level_key}** level.\n"
         f"{reprocess_note}\n\n"
-        f"Review the table below. Edit cells to correct data, then click "
-        f"**Save User Additions** to save your changes to User Data."
+        f"Review the table below. Edit cells to correct data, then:\n"
+        f"- Click **Save to Database** to save to the main catalog.\n"
+        f"- Click **Save User Additions** to save your changes to User Data."
     ), df, page_previews
 
 
@@ -608,6 +593,7 @@ def save_product_edit(product_id, new_name, new_model, new_category, new_brand, 
 
 
 def delete_product(product_id):
+    """Soft-delete: records deletion intent in user_data instead of destroying canonical records."""
     if not product_id:
         return "Enter a product ID."
     try:
@@ -618,11 +604,23 @@ def delete_product(product_id):
     conn = _get_db()
     try:
         cur = conn.cursor()
-        cur.execute("DELETE FROM products WHERE id = %s", (pid,))
-        conn.commit()
-        return f"Deleted product #{pid} and all its specs."
+        cur.execute("SELECT product_name, product_model, category, brand, mrp, description FROM products WHERE id = %s", (pid,))
+        row = cur.fetchone()
+        if not row:
+            return f"Product #{pid} not found."
     finally:
         conn.close()
+
+    product_dict = {
+        "product_name": row[0] or "",
+        "product_model": row[1] or "",
+        "category": row[2],
+        "brand": row[3],
+        "mrp": row[4],
+        "description": row[5],
+    }
+    user_pid = save_user_product(product_dict, original_product_id=pid, change_type="user_delete")
+    return f"Marked product #{pid} as deleted in user data (record #{user_pid}). Canonical data preserved."
 
 
 def add_spec_to_user_data(product_id, spec_key, spec_value):
@@ -924,7 +922,7 @@ def create_app():
 
                         save_key = gr.Textbox(label="Filename", interactive=False, visible=False)
                         with gr.Row():
-                            save_btn = gr.Button("Re-save to Database", variant="secondary")
+                            save_btn = gr.Button("Save to Database", variant="primary")
                             save_user_btn = gr.Button("Save User Additions (to User Data)", variant="primary")
                         save_status = gr.Markdown("")
 
@@ -1094,4 +1092,4 @@ def create_app():
 if __name__ == "__main__":
     demo = create_app()
     IMAGE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "images")
-    demo.launch(server_name="0.0.0.0", server_port=7862, share=False, allowed_paths=[IMAGE_DIR])
+    demo.launch(server_name="127.0.0.1", server_port=7862, share=False, allowed_paths=[IMAGE_DIR])
