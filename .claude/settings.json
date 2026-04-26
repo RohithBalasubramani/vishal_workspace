@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude usage:*)",
+      "Bash(claude --version)",
+      "Bash(npx --yes puppeteer --version)",
+      "Bash(wc -l /home/rohith/mcb_test/main.py /home/rohith/mcb_test/batch_daemon.py /home/rohith/mcb_test/app/ui.py /home/rohith/mcb_test/pipeline/*.py)",
+      "Bash(psql -U postgres -d mitsubishi_test -c \"\\\\dt+\")",
+      "Bash(tree -La /home/rohith/vishal_workspace/extractor_v1/)",
+      "Bash(psql -U postgres -d mitsubishi_test -c \"\\\\dv\")",
+      "Bash(psql -U postgres -d mitsubishi_test -c \"\\\\df\")",
+      "Bash(psql -U postgres -d mitsubishi_test -c \"\\\\di+\")",
+      "Bash(grep -v \"^$\")",
+      "Bash(ls -lh pdfsmanual/*.pdf)",
+      "Read(//home/rohith/vishal_workspace/**)",
+      "Bash(python -c ':*)",
+      "Bash(kill -0 2041743)",
+      "Bash(kill -0 2227646)",
+      "Bash(kill -0 2629549)",
+      "Bash(kill -0 2916552)",
+      "Bash(python -c \"from app.ui import create_app; demo = create_app\\(\\); print\\('OK'\\)\")",
+      "Bash(fuser -k 7862/tcp)",
+      "Bash(kill -0 3614671)",
+      "Bash(kill -0 3801266)",
+      "Bash(kill -0 25399)",
+      "Bash(kill -0 586536)",
+      "Bash(dpkg -l)",
+      "Bash(command -v npx)",
+      "WebFetch(domain:imfing.com)",
+      "Bash(curl -s http://localhost:5002/health)",
+      "Bash(nvidia-smi --query-gpu=memory.used,memory.free --format=csv,noheader)",
+      "Bash(npm --version)",
+      "Bash(codex --version)"
+    ]
+  }
+}

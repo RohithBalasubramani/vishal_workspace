@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @page { margin: 60px 50px 60px 50px; size: A4; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; color: #222; font-size: 10.5pt; line-height: 1.5; }
+  h1.title { text-align: center; color: #1a3a5c; font-size: 28pt; margin-top: 180px; margin-bottom: 5px; }
+  p.subtitle { text-align: center; color: #4a6a8c; font-size: 14pt; margin-top: 0; }
+  h1 { color: #1a3a5c; font-size: 18pt; border-bottom: 2px solid #ccc; padding-bottom: 6px; page-break-before: always; margin-top: 40px; }
+  h1:first-of-type { page-break-before: auto; }
+  h2 { color: #2a7ab5; font-size: 14pt; margin-top: 25px; }
+  h3 { color: #333; font-size: 11pt; margin-top: 18px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0 18px 0; font-size: 10pt; }
+  th { background: #2a5a8c; color: white; padding: 8px 10px; text-align: left; font-weight: 600; }
+  td { padding: 6px 10px; border-bottom: 1px solid #ddd; vertical-align: top; }
+  tr:nth-child(even) td { background: #f4f8fc; }
+  code, pre { font-family: 'Consolas', 'Courier New', monospace; font-size: 9.5pt; }
+  pre { background: #f0f3f7; padding: 12px; border-left: 3px solid #2a5a8c; margin: 10px 0; overflow-x: auto; white-space: pre-wrap; }
+  ul { margin: 6px 0; padding-left: 22px; }
+  li { margin: 3px 0; }
+  .meta-table { width: 80%; margin: 80px auto 0 auto; }
+  .meta-table th { background: #2a5a8c; width: 30%; }
+  .toc { page-break-before: always; }
+  .toc h1 { border-bottom: 2px solid #ccc; }
+  .toc-part { font-weight: bold; margin-top: 12px; color: #1a3a5c; }
+  .toc-item { margin-left: 30px; color: #333; }
+  .page-break { page-break-before: always; }
+  .note { background: #fff8e1; border-left: 3px solid #f0a030; padding: 8px 12px; margin: 10px 0; font-size: 10pt; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════ TITLE PAGE ═══════════════════════════════════════ -->
+
+<h1 class="title">MCB Catalog Manager</h1>
+<p class="subtitle">Catalog Extraction & Product Management Documentation</p>
+
+<table class="meta-table">
+  <tr><th>Field</th><th>Value</th></tr>
+  <tr><td>Document Type</td><td>Technical, Functional & Non-Technical Reference</td></tr>
+  <tr><td>Version</td><td>1.0</td></tr>
+  <tr><td>Date</td><td>April 1, 2026</td></tr>
+  <tr><td>System</td><td>PDF-to-Structured-Database Catalog Pipeline</td></tr>
+  <tr><td>Stack</td><td>Python 3.12 / PostgreSQL / PyMuPDF / Qwen 3.5-27B</td></tr>
+  <tr><td>Brands Supported</td><td>Lauritz Knudsen, Schneider, ABB, Siemens, Legrand, Hager, Havells</td></tr>
+  <tr><td>Categories</td><td>MCB, DC MCB, HR MCB, Solar Combo MCB, MCCB, RCCB, RCBO</td></tr>
+  <tr><td>Upstream Dependency</td><td>OCR Pipeline v2 (~/mcb_test/ocr_complete)</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════ TABLE OF CONTENTS ═══════════════════════════════ -->
+
+<div class="toc">
+<h1>Table of Contents</h1>
+
+<p class="toc-part">Part 1 &mdash; Non-Technical Overview</p>
+<p class="toc-item">1.1 What the System Does</p>
+<p class="toc-item">1.2 How It Works (Plain English)</p>
+<p class="toc-item">1.3 What Data Gets Extracted</p>
+<p class="toc-item">1.4 Web Interface</p>
+
+<p class="toc-part">Part 2 &mdash; Functional Specification</p>
+<p class="toc-item">2.1 Pipeline Stages</p>
+<p class="toc-item">2.2 Database Schema</p>
+<p class="toc-item">2.3 Extraction Rules</p>
+<p class="toc-item">2.4 Image Extraction & Linking</p>
+<p class="toc-item">2.5 AI Chat (RAG)</p>
+<p class="toc-item">2.6 Export</p>
+
+<p class="toc-part">Part 3 &mdash; Technical Reference</p>
+<p class="toc-item">3.1 Architecture Diagram</p>
+<p class="toc-item">3.2 Module Reference (7 Files)</p>
+<p class="toc-item">3.3 Database Tables (2 Tables)</p>
+<p class="toc-item">3.4 Key Function Reference</p>
+<p class="toc-item">3.5 Configuration & Dependencies</p>
+<p class="toc-item">3.6 CLI Reference & Deployment</p>
+<p class="toc-item">3.7 Scripts & Utilities</p>
+</div>
+
+<!-- ═══════════════════════════════════════ PART 1 ═══════════════════════════════════════════ -->
+
+<h1>Part 1 &mdash; Non-Technical Overview</h1>
+
+<h2>1.1 What the System Does</h2>
+
+<p>This system reads electrical product catalog PDFs from manufacturers like Lauritz Knudsen, Schneider Electric, ABB, and Siemens. It extracts every product's specifications &mdash; model numbers, current ratings, breaking capacities, pole configurations, curve types, prices &mdash; and organizes them into a searchable database.</p>
+
+<p>Think of it as a specialist who can read a 4-page catalog with hundreds of rows, understand the tables and product images, and enter every product into a perfectly organized database in under a minute &mdash; except it does this automatically, consistently, and can be asked questions about the data afterward.</p>
+
+<p><strong>Key Capabilities:</strong></p>
+<ul>
+  <li>Reads catalog pages using OCR (via the upstream OCR Pipeline v2)</li>
+  <li>Extracts product specifications from tables using an AI language model (Qwen 3.5-27B)</li>
+  <li>Stores products in a structured PostgreSQL database with flexible key-value specs</li>
+  <li>Extracts product images from PDFs and links them to the correct products using text-proximity matching</li>
+  <li>Provides a 5-tab web interface for uploading, browsing, editing, chatting, and exporting</li>
+  <li>Detects product categories (MCB, DC MCB, HR MCB, Solar Combo, MCCB, RCCB) intelligently</li>
+  <li>Supports benchmarking extraction quality between Qwen and Claude models</li>
+</ul>
+
+<h2>1.2 How It Works (Plain English)</h2>
+
+<p><strong>Step 1 &mdash; Upload Catalog:</strong> A catalog PDF is uploaded through the web interface or provided via the command line. The system accepts catalogs from any electrical product manufacturer.</p>
+
+<p><strong>Step 2 &mdash; Read Pages (OCR):</strong> Each PDF page is scanned by the upstream OCR Pipeline (~/mcb_test/ocr_complete) which uses GPU-powered AI (DeepSeek-OCR-2) to convert images of text and tables into machine-readable data.</p>
+
+<p><strong>Step 3 &mdash; Extract Products:</strong> The OCR'd tables are sent to an AI language model (Qwen 3.5-27B running locally via vLLM) which understands the table structure and extracts every product row with its complete specifications.</p>
+
+<p><strong>Step 4 &mdash; Save to Database:</strong> Products are inserted into PostgreSQL with duplicate detection (by model number). Each product gets 11-14 key-value specification pairs.</p>
+
+<p><strong>Step 5 &mdash; Extract & Link Images:</strong> Product images are extracted from the PDF using PyMuPDF. Each image is linked to the correct product by finding where the product's model number appears on the page and assigning the nearest image.</p>
+
+<p><strong>Step 6 &mdash; Browse & Query:</strong> Users can search products by specifications, browse by category, edit entries, ask the AI chatbot questions, or export data as CSV/Excel.</p>
+
+<h2>1.3 What Data Gets Extracted</h2>
+
+<p>For each electrical product, the system captures:</p>
+
+<table>
+  <tr><th>Category</th><th>Fields Captured</th></tr>
+  <tr><td>Identity</td><td>Brand, Product Name, Model/Catalog Number</td></tr>
+  <tr><td>Classification</td><td>Category (MCB/DC MCB/HR MCB/Solar Combo/MCCB/RCCB), Product Type</td></tr>
+  <tr><td>Electrical Specs</td><td>Current Rating (A), Breaking Capacity (kA), Curve Type (B/C/D), Poles (SP/DP/TP/FP)</td></tr>
+  <tr><td>Operating Params</td><td>Voltage (V), Modules, HSN Code, Standard (IS/IEC)</td></tr>
+  <tr><td>Commercial</td><td>MRP (price in INR), Pack Quantity</td></tr>
+  <tr><td>Visual</td><td>Product image extracted from catalog page</td></tr>
+  <tr><td>Traceability</td><td>Source document filename, extraction timestamp</td></tr>
+</table>
+
+<h2>1.4 Web Interface</h2>
+
+<p>The web interface (Gradio) runs at <code>http://localhost:7862</code> and has five tabs:</p>
+
+<ul>
+  <li><strong>Upload & Extract</strong> &mdash; Upload a catalog PDF; the pipeline runs OCR, LLM extraction, DB insert, and image linking with real-time streaming progress updates.</li>
+  <li><strong>Browse Products</strong> &mdash; Filter by category, search by product name or model number, and view detailed specs for any product.</li>
+  <li><strong>Review & Edit</strong> &mdash; Edit product name/model/category, delete products, or add new specification key-value pairs.</li>
+  <li><strong>Ask AI</strong> &mdash; Chat with an AI assistant that searches the product database for relevant context and answers questions about products, prices, and specifications.</li>
+  <li><strong>Export</strong> &mdash; Download the full catalog as CSV or Excel (.xlsx) with three sheets: Products, Specs (Pivot), and Specs (Raw).</li>
+</ul>
+
+<!-- ═══════════════════════════════════════ PART 2 ═══════════════════════════════════════════ -->
+
+<h1>Part 2 &mdash; Functional Specification</h1>
+
+<h2>2.1 Pipeline Stages</h2>
+
+<p>The system operates as a multi-stage pipeline. Each stage has defined inputs, outputs, and responsible modules.</p>
+
+<table>
+  <tr><th>Stage</th><th>Input</th><th>Output</th><th>Module</th></tr>
+  <tr><td>1. OCR</td><td>PDF page image</td><td>Markdown text + table records</td><td>~/mcb_test/ocr_complete (external)</td></tr>
+  <tr><td>2. LLM Extraction</td><td>Table headers + rows</td><td>Structured JSON products</td><td>catalog_extractor.py</td></tr>
+  <tr><td>3. DB Insert</td><td>Product list</td><td>Inserted/skipped counts</td><td>catalog_extractor.py</td></tr>
+  <tr><td>4. Image Extraction</td><td>PDF file</td><td>Embedded images with positions</td><td>image_extractor.py</td></tr>
+  <tr><td>5. Image Linking</td><td>Images + text positions</td><td>Product-image assignments</td><td>image_extractor.py</td></tr>
+  <tr><td>6. Page Rendering</td><td>PDF file</td><td>Full page screenshots (PNG)</td><td>image_extractor.py</td></tr>
+  <tr><td>7. AI Chat</td><td>User question</td><td>Streamed answer with DB context</td><td>ui.py (chatbot)</td></tr>
+  <tr><td>8. Export</td><td>DB query</td><td>CSV or Excel file</td><td>ui.py (export)</td></tr>
+</table>
+
+<h2>2.2 Database Schema</h2>
+
+<p>The system uses 2 PostgreSQL tables in the <code>lk_catalog</code> database:</p>
+
+<h3>Products Table</h3>
+
+<table>
+  <tr><th>Column</th><th>Type</th><th>Constraints</th></tr>
+  <tr><td>id</td><td>SERIAL</td><td>PRIMARY KEY</td></tr>
+  <tr><td>product_name</td><td>TEXT</td><td>NOT NULL</td></tr>
+  <tr><td>product_model</td><td>TEXT</td><td>NOT NULL, UNIQUE</td></tr>
+  <tr><td>description</td><td>TEXT</td><td>Auto-generated from first 5 specs</td></tr>
+  <tr><td>image_url</td><td>TEXT</td><td>Path to extracted product image</td></tr>
+  <tr><td>category</td><td>TEXT</td><td>Indexed</td></tr>
+  <tr><td>brand</td><td>TEXT</td><td>Indexed</td></tr>
+  <tr><td>rating</td><td>TEXT</td><td>Indexed</td></tr>
+  <tr><td>poles</td><td>TEXT</td><td>Indexed (SP/DP/TP/FP)</td></tr>
+  <tr><td>hsn_code</td><td>TEXT</td><td>&mdash;</td></tr>
+  <tr><td>modules</td><td>TEXT</td><td>&mdash;</td></tr>
+  <tr><td>mrp</td><td>TEXT</td><td>Indexed</td></tr>
+  <tr><td>standard</td><td>TEXT</td><td>&mdash;</td></tr>
+  <tr><td>product_type</td><td>TEXT</td><td>&mdash;</td></tr>
+  <tr><td>catalog_number</td><td>TEXT</td><td>Indexed</td></tr>
+  <tr><td>created_at</td><td>TIMESTAMPTZ</td><td>DEFAULT now()</td></tr>
+</table>
+
+<h3>Product Specs Table</h3>
+
+<table>
+  <tr><th>Column</th><th>Type</th><th>Constraints</th></tr>
+  <tr><td>id</td><td>SERIAL</td><td>PRIMARY KEY</td></tr>
+  <tr><td>product_id</td><td>INTEGER</td><td>FK &rarr; products(id), CASCADE delete</td></tr>
+  <tr><td>spec_key</td><td>TEXT</td><td>NOT NULL, Indexed</td></tr>
+  <tr><td>spec_value</td><td>TEXT</td><td>NOT NULL</td></tr>
+  <tr><td>product_model</td><td>TEXT</td><td>Indexed (denormalized)</td></tr>
+  <tr><td>category</td><td>TEXT</td><td>Indexed (denormalized)</td></tr>
+</table>
+
+<p><strong>Key Indexes:</strong></p>
+<ul>
+  <li>B-tree on products(product_name, category, brand, rating, poles, mrp, catalog_number)</li>
+  <li>B-tree on product_specs(product_id, spec_key, product_model, category)</li>
+  <li>Composite on product_specs(spec_key, spec_value) &mdash; fast spec-based queries</li>
+</ul>
+
+<h2>2.3 Extraction Rules</h2>
+
+<p>The LLM extraction uses a single method: Qwen 3.5-27B via vLLM with a structured prompt.</p>
+
+<table>
+  <tr><th>Parameter</th><th>Value</th></tr>
+  <tr><td>Model</td><td>Qwen/Qwen3.5-27B-FP8</td></tr>
+  <tr><td>Temperature</td><td>0.05 (near-deterministic)</td></tr>
+  <tr><td>Max Tokens</td><td>4096&ndash;8192</td></tr>
+  <tr><td>Timeout</td><td>120 seconds</td></tr>
+  <tr><td>Thinking Mode</td><td>Disabled (enable_thinking: false)</td></tr>
+  <tr><td>Max Rows per Call</td><td>50 (tables split if larger)</td></tr>
+</table>
+
+<p><strong>Extraction Prompt Rules:</strong></p>
+<ul>
+  <li>Extract EVERY product row &mdash; never sample or summarize</li>
+  <li>Required output fields: product_name, product_model, category, specs (dict)</li>
+  <li>Categories: MCB, MCCB, RCCB, RCBO, Contactor, Relay, Switch, Fuse, SPD, Isolator, Starter, Other</li>
+  <li>Capture all specs: rating, poles, voltage, price, curve type, breaking capacity, dimensions, standards</li>
+  <li>Handle multiple currencies: INR, USD, EUR, or unlabeled</li>
+  <li>Output must be valid JSON array</li>
+</ul>
+
+<p><strong>Brand Detection:</strong> The system auto-detects brand from the filename. Supported keywords: Schneider, Siemens, ABB, Legrand, Hager, Mitsubishi, Lauritz, LK, Havells, Polycab, L&T.</p>
+
+<p><strong>Duplicate Handling:</strong> Products are deduplicated by the <code>product_model</code> UNIQUE constraint. Existing models are skipped, not overwritten.</p>
+
+<h2>2.4 Image Extraction & Linking</h2>
+
+<p>The image pipeline extracts embedded product photos from PDFs and assigns each one to the correct product using text-proximity matching.</p>
+
+<h3>Image Filtering Rules</h3>
+
+<table>
+  <tr><th>Filter</th><th>Threshold</th><th>Purpose</th></tr>
+  <tr><td>Minimum size</td><td>100 &times; 100 px</td><td>Skip icons, bullets, logos</td></tr>
+  <tr><td>Minimum area</td><td>15,000 px&sup2;</td><td>Skip small decorative graphics</td></tr>
+  <tr><td>Maximum aspect ratio</td><td>5:1</td><td>Skip banners, strips, headers</td></tr>
+  <tr><td>Full-page filter</td><td>&gt;90% of page size</td><td>Skip background images</td></tr>
+  <tr><td>Product image filter</td><td>&lt;400,000 px&sup2;</td><td>Skip large promotional graphics</td></tr>
+</table>
+
+<h3>Text-Proximity Matching Algorithm</h3>
+
+<p>Instead of assigning images by page order or heuristic rules, the system uses the actual position of product model numbers in the PDF text to find the nearest image:</p>
+
+<ol>
+  <li><strong>Build text index:</strong> Scan each PDF page using <code>page.get_text("dict")</code> to extract every text span with its Y-coordinate.</li>
+  <li><strong>Locate product:</strong> For each product in the database, search the text index for its model number (e.g., "BB10010C"). This gives the page number and Y-position where the product appears in the catalog.</li>
+  <li><strong>Filter images:</strong> On the same page, filter to only product-quality images (not backgrounds, banners, or decorative elements).</li>
+  <li><strong>Find nearest:</strong> Calculate the vertical distance from the product's text position to each image's center point. Assign the closest image.</li>
+  <li><strong>Fallbacks:</strong> If the model number isn't found, try the catalog_number field. If still no match, assign the first available product image.</li>
+</ol>
+
+<p><strong>Result:</strong> Products in different table sections (SP, DP, TP, FP) on the same page are correctly assigned to their respective product images based on physical proximity in the catalog layout.</p>
+
+<h2>2.5 AI Chat (RAG)</h2>
+
+<p>The Ask AI tab provides a Retrieval-Augmented Generation chatbot:</p>
+
+<table>
+  <tr><th>Parameter</th><th>Value</th></tr>
+  <tr><td>Model</td><td>Qwen/Qwen3.5-27B-FP8</td></tr>
+  <tr><td>Temperature</td><td>0.1</td></tr>
+  <tr><td>Max Tokens</td><td>1024</td></tr>
+  <tr><td>Context Limit</td><td>10 products per query</td></tr>
+  <tr><td>Streaming</td><td>Yes (token-by-token)</td></tr>
+</table>
+
+<p><strong>Retrieval Process:</strong></p>
+<ol>
+  <li>Extract keywords from the user's question (words &gt; 2 characters)</li>
+  <li>Search products by: product_name ILIKE, product_model ILIKE, or spec_value ILIKE</li>
+  <li>Build context string: product name, model, category, and up to 10 specs per product</li>
+  <li>Send to LLM with system prompt: "Answer using ONLY the provided product data. Be precise with specs and prices."</li>
+  <li>Stream response back to the chat interface</li>
+</ol>
+
+<h2>2.6 Export</h2>
+
+<p>The Export tab generates downloadable files in two formats:</p>
+
+<table>
+  <tr><th>Format</th><th>Contents</th></tr>
+  <tr><td>CSV (.csv)</td><td>Specs pivot table (one column per spec key)</td></tr>
+  <tr><td>Excel (.xlsx)</td><td>Sheet 1: All product fields<br>Sheet 2: Specs pivot (product_model &times; spec_key)<br>Sheet 3: Specs raw (product_model, spec_key, spec_value)</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════ PART 3 ═══════════════════════════════════════════ -->
+
+<h1>Part 3 &mdash; Technical Reference</h1>
+
+<h2>3.1 Architecture Diagram</h2>
+
+<pre>
+main.py (CLI entry point)
+  |
+  +---> --init-db     pipeline/db.py ---------> PostgreSQL (lk_catalog)
+  |
+  +---> --seed        scripts/seed_lk_catalog.py --> PostgreSQL (lk_catalog)
+  |
+  +---> --extract     pipeline/catalog_extractor.py
+  |                     |
+  |                     +---> ~/mcb_test/ocr_complete (OCR engine)
+  |                     +---> vLLM Qwen 3.5-27B (localhost:8200)
+  |                     +---> PostgreSQL (lk_catalog)
+  |                   pipeline/image_extractor.py
+  |                     +---> PyMuPDF (PDF parsing)
+  |                     +---> PostgreSQL (lk_catalog)
+  |
+  +---> (default)     app/ui.py (Gradio Web UI)
+                        |
+                        +---> pipeline/db.py
+                        +---> pipeline/catalog_extractor.py
+                        +---> pipeline/image_extractor.py
+                        +---> vLLM Qwen 3.5-27B (AI Chat)
+</pre>
+
+<pre>
+DATA FLOW:
+
+PDF Upload --> ~/mcb_test/ocr_complete (OCR) --> Tables (headers + rows)
+                                            |
+                                            v
+                                  vLLM Qwen 3.5-27B (extraction prompt)
+                                            |
+                                            v
+                                  JSON [{product_name, product_model, specs}]
+                                            |
+                              +-------------+-------------+
+                              |                           |
+                              v                           v
+                        products table            product_specs table
+                              |
+                              v
+                   PyMuPDF image extraction
+                              |
+                              v
+                   Text-proximity linking
+                   (model number Y-pos --> nearest image)
+                              |
+                              v
+                   products.image_url updated
+</pre>
+
+<h2>3.2 Module Reference (7 Files)</h2>
+
+<table>
+  <tr><th>Module</th><th>Lines</th><th>Responsibility</th></tr>
+  <tr><td>app/ui.py</td><td>499</td><td>Gradio web UI: 5 tabs (Upload, Browse, Review, Chat, Export)</td></tr>
+  <tr><td>pipeline/image_extractor.py</td><td>376</td><td>PDF image extraction, text-proximity linking, page rendering</td></tr>
+  <tr><td>pipeline/catalog_extractor.py</td><td>343</td><td>OCR-to-LLM extraction pipeline, DB insert, batch processing</td></tr>
+  <tr><td>main.py</td><td>70</td><td>CLI entry point: 4 modes (UI, extract, seed, init-db)</td></tr>
+  <tr><td>pipeline/db.py</td><td>59</td><td>Database connection, schema creation, index management</td></tr>
+  <tr><td>scripts/seed_lk_catalog.py</td><td>380</td><td>Seed ~256 Lauritz Knudsen MCB products with full specs</td></tr>
+  <tr><td>benchmarks/claude_extractor.py</td><td>548</td><td>Claude vs Qwen extraction quality benchmark</td></tr>
+</table>
+
+<h2>3.3 Database Tables (2 Tables)</h2>
+
+<table>
+  <tr><th>Table</th><th>Primary Key</th><th>Description</th></tr>
+  <tr><td>products</td><td>SERIAL PK</td><td>Unique products (product_model UNIQUE). 15 columns including name, model, category, brand, rating, poles, mrp, image_url.</td></tr>
+  <tr><td>product_specs</td><td>SERIAL PK</td><td>Flexible key-value specifications per product. FK to products(id) with CASCADE delete.</td></tr>
+</table>
+
+<p><strong>Key Indexes:</strong></p>
+<ul>
+  <li>B-tree on products(product_name) &mdash; name search</li>
+  <li>B-tree on products(category) &mdash; category filtering</li>
+  <li>B-tree on products(brand, rating, poles, mrp, catalog_number) &mdash; spec-based queries</li>
+  <li>B-tree on product_specs(product_id) &mdash; join performance</li>
+  <li>B-tree on product_specs(spec_key) &mdash; spec lookups</li>
+  <li>Composite on product_specs(spec_key, spec_value) &mdash; spec value search</li>
+  <li>B-tree on product_specs(product_model, category) &mdash; denormalized lookups</li>
+</ul>
+
+<h2>3.4 Key Function Reference</h2>
+
+<h3>Catalog Extraction Pipeline:</h3>
+
+<table>
+  <tr><th>Function</th><th>Returns</th><th>Module</th></tr>
+  <tr><td>process_catalog(pdf_path, brand_hint)</td><td>{filename, brand, tables, extracted, inserted, skipped}</td><td>catalog_extractor.py</td></tr>
+  <tr><td>extract_from_tables(tables, filename, brand_hint)</td><td>list[{product_name, product_model, category, specs}]</td><td>catalog_extractor.py</td></tr>
+  <tr><td>save_products(products)</td><td>(inserted_count, skipped_count)</td><td>catalog_extractor.py</td></tr>
+  <tr><td>batch_extract_from_db(run_ids)</td><td>{documents, inserted, skipped}</td><td>catalog_extractor.py</td></tr>
+  <tr><td>_call_llm(prompt, max_tokens)</td><td>LLM response text</td><td>catalog_extractor.py</td></tr>
+  <tr><td>_parse_json_response(text)</td><td>list[dict] or []</td><td>catalog_extractor.py</td></tr>
+</table>
+
+<h3>Image Extraction & Linking:</h3>
+
+<table>
+  <tr><th>Function</th><th>Returns</th><th>Module</th></tr>
+  <tr><td>extract_images_from_pdf(pdf_path, output_dir)</td><td>list[{path, page, x, y, width, height, index}]</td><td>image_extractor.py</td></tr>
+  <tr><td>render_pages(pdf_path, output_dir, dpi)</td><td>list[{path, page, width, height}]</td><td>image_extractor.py</td></tr>
+  <tr><td>link_images_to_products(images, filename, pdf_path)</td><td>count of products updated</td><td>image_extractor.py</td></tr>
+  <tr><td>process_pdf_images(pdf_path)</td><td>{filename, embedded_images, page_renders, products_linked}</td><td>image_extractor.py</td></tr>
+  <tr><td>get_product_with_image(product_model)</td><td>dict with product + specs + image or None</td><td>image_extractor.py</td></tr>
+  <tr><td>_build_text_positions(pdf_path)</td><td>{page_num: [(text, y_center), ...]}</td><td>image_extractor.py</td></tr>
+  <tr><td>_find_model_position(model, text_positions)</td><td>(page_num, y_center) or (None, None)</td><td>image_extractor.py</td></tr>
+  <tr><td>_nearest_image(y_pos, page_images)</td><td>image dict with minimum distance</td><td>image_extractor.py</td></tr>
+</table>
+
+<h3>Database & UI:</h3>
+
+<table>
+  <tr><th>Function</th><th>Returns</th><th>Module</th></tr>
+  <tr><td>get_db()</td><td>psycopg2 connection</td><td>db.py</td></tr>
+  <tr><td>init_db()</td><td>Creates tables + indexes</td><td>db.py</td></tr>
+  <tr><td>create_app()</td><td>Gradio Blocks demo</td><td>ui.py</td></tr>
+  <tr><td>browse_products(category, search_text)</td><td>pandas DataFrame</td><td>ui.py</td></tr>
+  <tr><td>get_product_detail(product_id)</td><td>Markdown string with specs table</td><td>ui.py</td></tr>
+  <tr><td>chat(message, history)</td><td>generator[(input, history)]</td><td>ui.py</td></tr>
+  <tr><td>export_db(fmt)</td><td>(file_path, status_message)</td><td>ui.py</td></tr>
+</table>
+
+<h2>3.5 Configuration & Dependencies</h2>
+
+<h3>External Services:</h3>
+
+<table>
+  <tr><th>Service</th><th>Endpoint</th><th>Notes</th></tr>
+  <tr><td>PostgreSQL</td><td>localhost:5432</td><td>Database: lk_catalog, User: postgres</td></tr>
+  <tr><td>Qwen 3.5-27B</td><td>localhost:8200</td><td>vLLM server, FP8 quantization</td></tr>
+  <tr><td>OCR Pipeline v2</td><td>~/mcb_test/ocr_complete</td><td>Python path import (DeepSeek-OCR-2 engine)</td></tr>
+  <tr><td>Gradio UI</td><td>localhost:7862</td><td>Configurable via --port</td></tr>
+</table>
+
+<h3>Python Dependencies:</h3>
+
+<table>
+  <tr><th>Package</th><th>Purpose</th></tr>
+  <tr><td>gradio</td><td>Web UI framework (5-tab interface)</td></tr>
+  <tr><td>psycopg2-binary</td><td>PostgreSQL driver</td></tr>
+  <tr><td>pandas</td><td>Data manipulation and export</td></tr>
+  <tr><td>openpyxl</td><td>Excel file creation (.xlsx)</td></tr>
+  <tr><td>requests</td><td>HTTP client for vLLM API calls</td></tr>
+  <tr><td>pymupdf (fitz)</td><td>PDF parsing, image extraction, text position indexing</td></tr>
+  <tr><td>pillow</td><td>Image processing and format conversion</td></tr>
+</table>
+
+<h2>3.6 CLI Reference & Deployment</h2>
+
+<h3>Command-Line Interface:</h3>
+
+<pre>
+python main.py                                  # Launch Gradio UI on port 7862
+python main.py --port 8000                      # Launch UI on custom port
+python main.py --init-db                        # Initialize database schema
+python main.py --seed                           # Seed DB with ~256 LK MCB products
+python main.py --extract /path/to/catalog.pdf   # Extract products from PDF
+python main.py --extract catalog.pdf --brand ABB # Extract with brand hint
+</pre>
+
+<h3>Deployment:</h3>
+
+<pre>
+# 1. Ensure PostgreSQL is running
+sudo systemctl start postgresql
+
+# 2. Ensure vLLM is serving Qwen 3.5-27B
+# (on localhost:8200)
+
+# 3. Initialize and seed
+python main.py --init-db
+python main.py --seed
+
+# 4. Launch the application
+python main.py --port 7862
+
+# 5. (Optional) Expose via Cloudflare Tunnel
+cloudflared tunnel --url http://localhost:7862
+</pre>
+
+<h2>3.7 Scripts & Utilities</h2>
+
+<table>
+  <tr><th>Script</th><th>Lines</th><th>Purpose</th></tr>
+  <tr><td>scripts/seed_lk_catalog.py</td><td>380</td><td>Seed lk_catalog with ~256 Lauritz Knudsen MCB products across 4 categories: MCB (SP/DP/TP/FP, B/C/D curves, 0.5A-63A), HR MCB (80A-125A), Solar Combo (9 variants), DC MCB (130V/250V/500V/1000V)</td></tr>
+  <tr><td>scripts/setup_db.py</td><td>202</td><td>Create mcb_test DB schema and populate from existing ocr_data DB (run_id=51)</td></tr>
+  <tr><td>scripts/query_db.py</td><td>62</td><td>Query utilities: list products, search by rating/curve/poles/voltage</td></tr>
+  <tr><td>scripts/export_db.py</td><td>51</td><td>Export mcb_test DB to data/exports/ as CSV and Excel</td></tr>
+  <tr><td>benchmarks/claude_extractor.py</td><td>548</td><td>Compare Qwen (local vLLM) vs Claude Sonnet (CLI) extraction quality. Modes: from-ocr, benchmark, full pipeline. Metrics: product count, spec count, cross-model agreement %</td></tr>
+</table>
+
+<h3>Benchmark Usage:</h3>
+
+<pre>
+python benchmarks/claude_extractor.py from-ocr     # Extract using Claude from existing OCR data
+python benchmarks/claude_extractor.py benchmark     # Compare lk_catalog vs lk_catalog_claude
+python benchmarks/claude_extractor.py catalog.pdf   # Full pipeline: Claude Vision OCR + extraction
+</pre>
+
+<!-- ═══════════════════════════════════════ FILE MANIFEST ═══════════════════════════════════ -->
+
+<h1>File Manifest</h1>
+
+<table>
+  <tr><th>File</th><th>Lines</th><th>Purpose</th></tr>
+  <tr><td>main.py</td><td>70</td><td>CLI entry point (4 modes: UI, extract, seed, init-db)</td></tr>
+  <tr><td>requirements.txt</td><td>7</td><td>Python dependencies</td></tr>
+  <tr><td>pipeline/db.py</td><td>59</td><td>Database connection and schema management</td></tr>
+  <tr><td>pipeline/catalog_extractor.py</td><td>343</td><td>OCR &rarr; LLM &rarr; DB extraction pipeline</td></tr>
+  <tr><td>pipeline/image_extractor.py</td><td>376</td><td>Image extraction and text-proximity linking</td></tr>
+  <tr><td>pipeline/__init__.py</td><td>0</td><td>Package init</td></tr>
+  <tr><td>app/ui.py</td><td>499</td><td>5-tab Gradio web interface</td></tr>
+  <tr><td>app/__init__.py</td><td>0</td><td>Package init</td></tr>
+  <tr><td>scripts/setup_db.py</td><td>202</td><td>Populate mcb_test from ocr_data</td></tr>
+  <tr><td>scripts/seed_lk_catalog.py</td><td>380</td><td>Seed ~256 LK MCB products</td></tr>
+  <tr><td>scripts/query_db.py</td><td>62</td><td>Query utilities</td></tr>
+  <tr><td>scripts/export_db.py</td><td>51</td><td>Export to CSV/Excel</td></tr>
+  <tr><td>benchmarks/claude_extractor.py</td><td>548</td><td>Claude vs Qwen benchmark</td></tr>
+  <tr><td colspan="2"><strong>Total</strong></td><td><strong>2,597 lines of Python</strong></td></tr>
+</table>
+
+</body>
+</html>

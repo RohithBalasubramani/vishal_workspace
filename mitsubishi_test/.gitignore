@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+*.pyo
+.gradio/
+*.egg-info/
+dist/
+build/
+.env
+
+# Large/binary artifacts
+.claude/
+venv/
+ocr_complete/venv/
+ocr_complete/chroma_db/
+ocr_complete/NeuraAI/
+ocr_complete/__pycache__/
+data/catalogs/
+data/images/
+
+# Binary files
+*.so
+*.sqlite3
+*.bin
+*.xlsx
+*.pdf
+*.png
+*.jpeg
+*.jpg

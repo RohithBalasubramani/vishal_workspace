@@ -1,0 +1,27 @@
+# Large data directories
+mitsubishi_test/data/
+mitsubishi_test/pdfsmanual/
+boq/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# PDF outputs
+*.pdf
