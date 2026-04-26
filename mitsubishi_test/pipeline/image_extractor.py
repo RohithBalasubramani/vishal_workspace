@@ -485,6 +485,37 @@ def link_images_to_products(images, filename, pdf_path=None):
                         if pid in product_pages:
                             break
 
+            # Fallback for scanned PDFs where text extraction returns nothing:
+            # Distribute unmatched products across pages that have images.
+            # This handles L&T and other CID-encoded PDFs where get_text()
+            # returns empty strings but OCR/LLM extracted the products fine.
+            if len(product_pages) < len(products) * 0.1 and images_by_page:
+                unmatched = [p for p in products if p[0] not in product_pages]
+                img_pages = sorted(images_by_page.keys())
+                if unmatched and img_pages:
+                    # Try fuzzy matching against any text we do have
+                    for pid, pname, pmodel, category, brand in unmatched:
+                        for pg, entries in text_positions.items():
+                            for txt, x, y in entries:
+                                if fuzz.partial_ratio(pmodel, txt) > 85:
+                                    product_pages[pid] = (pg, x, y)
+                                    break
+                            if pid in product_pages:
+                                break
+
+                    # Still unmatched? Distribute evenly across image pages
+                    still_unmatched = [p for p in unmatched if p[0] not in product_pages]
+                    if still_unmatched:
+                        per_page = max(1, len(still_unmatched) // len(img_pages))
+                        for idx, (pid, pname, pmodel, category, brand) in enumerate(still_unmatched):
+                            page_idx = min(idx // per_page, len(img_pages) - 1)
+                            page_num = img_pages[page_idx]
+                            # Place at center of page, spaced vertically
+                            y_pos = 100 + (idx % per_page) * 50
+                            product_pages[pid] = (page_num, 300, y_pos)
+
+                    print(f"  [Image] Scanned PDF fallback: mapped {len(product_pages)}/{len(products)} products to image pages")
+
             # Step 3: Match products to images
             for pid, pname, pmodel, category, brand in products:
                 best_img = None

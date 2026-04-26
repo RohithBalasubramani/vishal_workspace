@@ -39,7 +39,8 @@ _COMPARISON_TABLE_RULE = """- COMPARISON/SPECIFICATION TABLES: If the table comp
   - "specs" = all row values for that column as key-value pairs (row header = spec_key, cell value = spec_value)
 - Only the product_name, product_model, and category go in the product. ALL other data (ratings, power, topology, wiring, dimensions, etc.) goes into "specs" as key-value pairs."""
 
-_CATEGORY_RULE = """- "category": one of MCB, MCCB, RCCB, RCBO, ACB, Isolator, Contactor, Relay, Switch, Fuse, SPD, Starter, UPS, Meter, Drive, Controller, Sensor, Enclosure, Cable, Busbar, or Other"""
+_CATEGORY_RULE = """- "category": one of MCB, MCCB, RCCB, RCBO, ACB, Isolator, Contactor, Relay, Switch, Fuse, SPD, Starter, UPS, Meter, Drive, Controller, Sensor, Enclosure, Cable, Busbar, or Other
+  Examples: Pilot lights/indicators/push buttons → Switch. Cable ties/cable trays → Cable. Contact sets/spare kits/auxiliary contacts → Contactor. Shunt trips/coils/motor operators → ACB. Mounting plates/brackets/DIN rails/terminal blocks → Enclosure. Surge arresters → SPD. Timers/overload relays → Relay. Solar/PV/inverters → Drive. CTs/VTs → Sensor. Energy meters → Meter. Use "Other" ONLY if the product truly doesn't fit any category."""
 
 EXTRACTION_LEVELS = {
     "basic": {
@@ -351,6 +352,45 @@ Extract all products as a JSON array:"""
         return []
 
 
+def _reclassify_other(name: str, model: str, specs: dict) -> str:
+    """Reclassify products the LLM tagged as 'Other' using keyword rules.
+
+    Catches: pilot lights, cable ties, sockets, contact kits, interlocks,
+    mounting hardware, shunt releases, etc. that the LLM couldn't map to
+    the 20 standard categories.
+    """
+    text = f"{name} {model} {' '.join(str(v) for v in specs.values())}".lower()
+
+    rules = [
+        # (keywords_any_of, category)
+        (["pilot light", "indicator light", "signal lamp", "led indicator"], "Switch"),
+        (["cable tie", "ty-fast", "cable management", "cable tray"], "Cable"),
+        (["contact set", "contact kit", "spare contact", "auxiliary contact",
+         "aux contact", "trip alarm"], "Contactor"),
+        (["shunt release", "shunt trip", "undervoltage release", "closing coil",
+         "opening coil", "motor operator"], "ACB"),
+        (["socket", "charger", "usb", "plug"], "Switch"),
+        (["interlock", "racking", "padlock", "lock hasp", "locking"], "Enclosure"),
+        (["mounting", "bracket", "din rail", "mounting plate", "spreader terminal",
+         "terminal block", "clamp", "busbar clamp"], "Enclosure"),
+        (["fuse", "fuse base", "fuse link", "fuse holder", "fuse kit"], "Fuse"),
+        (["surge", "surge arrester", "spd", "lightning"], "SPD"),
+        (["timer", "time relay", "time switch", "programmable"], "Relay"),
+        (["overload", "thermal overload", "electronic overload"], "Relay"),
+        (["solar", "pv", "photovoltaic", "inverter string"], "Drive"),
+        (["capacitor", "power factor", "apfc"], "Controller"),
+        (["energy meter", "kwh meter", "multifunction meter"], "Meter"),
+        (["push button", "selector switch", "mushroom head"], "Switch"),
+        (["current transformer", "ct", "voltage transformer"], "Sensor"),
+        (["recloser", "auto-reclosing", "reclosing unit"], "MCB"),
+    ]
+
+    for keywords, category in rules:
+        if any(kw in text for kw in keywords):
+            return category
+    return "Other"
+
+
 def _items_to_products(items: list, brand_hint: str | None) -> list:
     """Convert raw LLM items to product dicts."""
     products = []
@@ -360,12 +400,20 @@ def _items_to_products(items: list, brand_hint: str | None) -> list:
                  or item.get("cat_no") or item.get("catalog_number"))
         if not model:
             continue
+        category = item.get("category", "Other")
+        name = item.get("product_name") or item.get("name", "")
+        specs = item.get("specs", {})
+
+        # Reclassify if LLM defaulted to "Other"
+        if category == "Other":
+            category = _reclassify_other(name, str(model), specs)
+
         products.append({
-            "product_name": item.get("product_name") or item.get("name", ""),
+            "product_name": name,
             "product_model": str(model).strip(),
-            "category": item.get("category", "Other"),
+            "category": category,
             "brand": brand_hint or item.get("brand", ""),
-            "specs": item.get("specs", {}),
+            "specs": specs,
         })
     return products
 
@@ -470,14 +518,20 @@ def extract_from_tables(tables, filename, brand_hint=None, level="detailed",
             if progress_cb:
                 progress_cb(completed, len(batches), len(all_products))
 
-    # Fill missing brands
+    # Fill missing brands — cascade: brand_hint → product text → filename → catalogue
+    catalog_brand = _auto_brand(filename) or brand_hint
     for product in all_products:
-        if not product.get("brand") or product.get("brand") == "Unknown":
-            inferred = brand_hint or _infer_brand_from_text(
-                f"{product.get('product_name', '')} {filename}"
-            )
+        if not product.get("brand") or product.get("brand") in ("Unknown", ""):
+            inferred = (brand_hint
+                        or _infer_brand_from_text(product.get('product_name', ''))
+                        or _auto_brand(filename)
+                        or catalog_brand)
             if inferred:
                 product["brand"] = inferred
+
+        # Track source catalog for downstream use (image linking, auditing)
+        if not product.get("catalogue_name"):
+            product["catalogue_name"] = filename
 
     # Filter specs by extraction level
     if level == "basic":
@@ -516,12 +570,18 @@ def _extract_mrp(specs: dict) -> str | None:
 
 
 def _normalize_spec_key(key: str) -> str:
-    """Normalize a spec key — maps price variants to 'mrp'."""
-    if key.lower().replace(" ", "_").replace(".", "") in {
-        k.lower().replace(" ", "_").replace(".", "") for k in _MRP_KEYS
-    }:
+    """Normalize a spec key — lowercase + underscore for consistency.
+
+    Maps all price variants to 'mrp'. Converts all other keys to
+    lowercase_with_underscores to prevent case-duplicate entries
+    (e.g. 'Type' vs 'type', 'Description' vs 'description').
+    """
+    normalized = key.strip().lower().replace(" ", "_").replace(".", "").replace("-", "_")
+    # Collapse multiple underscores
+    normalized = re.sub(r'_+', '_', normalized).strip('_')
+    if normalized in {k.lower().replace(" ", "_").replace(".", "") for k in _MRP_KEYS}:
         return "mrp"
-    return key
+    return normalized
 
 
 def _flatten_spec_value(value) -> str:
@@ -616,13 +676,13 @@ def save_products(products):
                     if not value:
                         continue
 
-                    # Skip if this spec already exists for this product
+                    # Skip if this spec already exists (case-insensitive check)
                     cur.execute(
-                        "SELECT 1 FROM product_specs WHERE product_id = %s AND spec_key = %s",
-                        (pid, key),
+                        "SELECT 1 FROM product_specs WHERE product_id = %s AND LOWER(spec_key) = %s",
+                        (pid, key.lower()),
                     )
                     if cur.fetchone():
-                        continue  # Spec already exists, don't overwrite
+                        continue
 
                     cur.execute(
                         """
