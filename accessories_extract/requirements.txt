@@ -1,0 +1,7 @@
+gradio
+psycopg2-binary
+pandas
+openpyxl
+requests
+pymupdf
+pillow

@@ -1,0 +1,6 @@
+gradio
+psycopg2-binary
+pandas
+openpyxl
+reportlab
+pillow

@@ -30,7 +30,26 @@
       "Bash(curl -s http://localhost:5002/health)",
       "Bash(nvidia-smi --query-gpu=memory.used,memory.free --format=csv,noheader)",
       "Bash(npm --version)",
-      "Bash(codex --version)"
+      "Bash(codex --version)",
+      "Bash(python -c \"import gradio, psycopg2, pandas, openpyxl, requests, fitz, PIL, rapidfuzz\")",
+      "Read(//home/**)",
+      "Bash(systemctl --user status mitsubishi-catalog.service --no-pager)",
+      "Bash(python)",
+      "Bash(psql -U postgres -d mitsubishi_test -c ':*)",
+      "Bash(psql -U postgres -d mitsubishi_test -c \"SELECT count\\(*\\) as total_incomplete FROM incomplete_products;\")",
+      "Bash(journalctl --user -u accessories-extract.service --since \"15 min ago\" --no-pager)",
+      "Bash(journalctl --user -u accessories-extract.service --since \"20 min ago\" --no-pager)",
+      "Bash(PGPASSWORD=\"\" psql -U postgres -h localhost -d quotations -c \"SELECT id, quote_number, customer_name FROM quotations;\")",
+      "Bash(PGPASSWORD=\"\" psql -U postgres -h localhost -d quotations -c \"DELETE FROM quotations WHERE customer_name = 'Cli Test'; SELECT COUNT\\(*\\) AS remaining FROM quotations;\")",
+      "Bash(PGPASSWORD=\"\" psql -U postgres -h localhost -d mitsubishi_test -c \"SELECT COUNT\\(*\\) AS total, COUNT\\(image_url\\) AS with_url, COUNT\\(CASE WHEN image_url IS NOT NULL AND image_url != '' THEN 1 END\\) AS non_empty FROM products;\")",
+      "Bash(PGPASSWORD=\"\" psql -U postgres -h localhost -d mitsubishi_test -c \"SELECT image_url FROM products WHERE image_url IS NOT NULL AND image_url != '' LIMIT 5;\")",
+      "Bash(PGPASSWORD=\"\" psql -U postgres -h localhost -d mitsubishi_test -t -c \"SELECT image_url FROM products WHERE image_url IS NOT NULL AND image_url != '' LIMIT 3;\")",
+      "Bash(xargs -I{} ls -la {})",
+      "Bash(awk '{print $2}')",
+      "Bash(xargs -r kill -9)",
+      "Bash(echo \"PID=$!\")",
+      "Bash(disown)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:7864/)"
     ]
   }
 }

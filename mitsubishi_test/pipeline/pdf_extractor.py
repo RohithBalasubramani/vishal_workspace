@@ -231,81 +231,99 @@ def _extract_tables_from_text(text: str, pdf_path: str) -> list[dict]:
 
 
 def _ocr_page_by_page(pdf_path: str) -> tuple[str, list[dict]]:
-    """GPU OCR fallback for scanned/image-only PDFs.
+    """OCR fallback for scanned/image-only PDFs via GLM-OCR server (GPU).
 
-    Renders each page as an image and runs DeepSeek-OCR-2 one page at a time,
-    clearing CUDA cache between pages to minimize GPU memory usage.
+    Renders each page as PNG and sends to GLM-OCR on port 5003 with
+    'Table Recognition:' prompt. No subprocess, no venv dependency.
     """
-    import subprocess, json
+    import base64
+    import requests
 
-    ocr_venv_python = os.path.expanduser("~/mcb_test/ocr_complete/venv/bin/python")
-    ocr_dir = os.path.expanduser("~/mcb_test/ocr_complete")
-
-    if not os.path.exists(ocr_venv_python):
-        raise RuntimeError("OCR venv not found at ~/mcb_test/ocr_complete/venv")
+    GLM_OCR_URL = "http://localhost:5003/v1/chat/completions"
+    GLM_OCR_MODEL = "zai-org/GLM-OCR"
 
     doc = fitz.open(pdf_path)
     num_pages = len(doc)
-    doc.close()
 
     all_text = []
     all_tables = []
 
-    # Process page-by-page to control GPU memory
     for page_idx in range(num_pages):
-        ocr_script = f"""
-import sys, json, gc, torch
-sys.path.insert(0, '{ocr_dir}')
-from pipeline import processor
+        page = doc[page_idx]
+        page_rect = page.rect
+        zoom = 200 / 72
 
-# Render single page to temp image
-import fitz
-doc = fitz.open('{pdf_path}')
-page = doc[{page_idx}]
-zoom = 300 / 72
-mat = fitz.Matrix(zoom, zoom)
-pix = page.get_pixmap(matrix=mat)
-import tempfile, os
-tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-pix.save(tmp.name)
-doc.close()
+        # Split page into segments to capture ALL tables.
+        # GLM-OCR tends to return only one table per image, so we send
+        # the full page first, then each half, deduplicating results.
+        segments = [
+            ("full", page_rect),
+            ("top", fitz.Rect(page_rect.x0, page_rect.y0, page_rect.x1, page_rect.y0 + page_rect.height * 0.55)),
+            ("bottom", fitz.Rect(page_rect.x0, page_rect.y0 + page_rect.height * 0.45, page_rect.x1, page_rect.y1)),
+        ]
 
-text, tables, dt, method, file_type, num_pages = processor.process(tmp.name)
-os.unlink(tmp.name)
+        page_all_text = []
+        page_all_tables = []
+        seen_header_sigs = set()
 
-# Clear GPU memory immediately
-gc.collect()
-if torch.cuda.is_available():
-    torch.cuda.empty_cache()
+        for seg_name, clip_rect in segments:
+            pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=clip_rect)
 
-result = {{"text": text, "tables": tables, "page": {page_idx + 1}}}
-print("__PAGE_OCR_JSON__")
-print(json.dumps(result))
-"""
-        try:
-            proc = subprocess.run(
-                [ocr_venv_python, "-c", ocr_script],
-                capture_output=True, text=True, timeout=120,
-                cwd=ocr_dir,
-                env={**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"},
-            )
-            if proc.returncode != 0:
-                print(f"  [OCR] Page {page_idx+1} failed: {proc.stderr.strip().split(chr(10))[-1]}")
+            # Cap oversized renders
+            if max(pix.width, pix.height) > 2000:
+                scale = 2000 / max(pix.width, pix.height)
+                pix = page.get_pixmap(matrix=fitz.Matrix(zoom * scale, zoom * scale), clip=clip_rect)
+
+            b64 = base64.b64encode(pix.tobytes("png")).decode("utf-8")
+
+            try:
+                resp = requests.post(GLM_OCR_URL, json={
+                    "model": GLM_OCR_MODEL,
+                    "messages": [{"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                        {"type": "text", "text": "Table Recognition:"},
+                    ]}],
+                    "max_tokens": 16384,
+                }, timeout=300)
+
+                if resp.status_code != 200:
+                    if seg_name == "full":
+                        print(f"  [OCR] Page {page_idx+1}: GLM-OCR error {resp.status_code}")
+                    continue
+
+                seg_text = resp.json()["choices"][0]["message"]["content"]
+
+                page_all_text.append(seg_text)
+
+                # Parse tables from HTML output
+                from .catalog_extractor import _parse_html_tables_simple
+                seg_tables = _parse_html_tables_simple(seg_text, page_idx + 1)
+
+                # Deduplicate: skip tables whose headers we already captured
+                for t in seg_tables:
+                    header_sig = "|".join(str(h).strip().lower() for h in t.get("headers", []))
+                    if header_sig not in seen_header_sigs:
+                        seen_header_sigs.add(header_sig)
+                        page_all_tables.append(t)
+
+            except requests.exceptions.ConnectionError:
+                print(f"  [OCR] GLM-OCR server not running on port 5003")
+                doc.close()
+                return "\n".join(all_text), all_tables
+            except requests.exceptions.ReadTimeout:
+                if seg_name == "full":
+                    print(f"  [OCR] Page {page_idx+1} timed out (300s), skipping")
+                continue
+            except Exception as e:
+                if seg_name == "full":
+                    print(f"  [OCR] Page {page_idx+1} error: {e}")
                 continue
 
-            marker = "__PAGE_OCR_JSON__\n"
-            if marker in proc.stdout:
-                result = json.loads(proc.stdout.split(marker, 1)[1])
-                all_text.append(result.get("text", ""))
-                for t in result.get("tables", []):
-                    t["page"] = page_idx + 1
-                    all_tables.append(t)
-        except subprocess.TimeoutExpired:
-            print(f"  [OCR] Page {page_idx+1} timed out, skipping")
-            continue
-        except Exception as e:
-            print(f"  [OCR] Page {page_idx+1} error: {e}")
-            continue
+        all_text.append(f"--- Page {page_idx + 1} ---\n" + "\n".join(page_all_text))
+        all_tables.extend(page_all_tables)
+        print(f"  [OCR] Page {page_idx+1}: {len(page_all_tables)} tables (from {len(segments)} segments)")
+
+    doc.close()
 
     return "\n".join(all_text), all_tables
 
@@ -397,18 +415,29 @@ def process(pdf_path: str) -> tuple:
         text = extract_text_fitz(pdf_path)
         tables = extract_tables_pdfplumber(pdf_path)
 
-        # Supplement with text-based extraction if pdfplumber found too few
-        if len(tables) < num_pages * 0.1 and num_pages > 5:
-            text_tables = _extract_tables_from_text(text, pdf_path)
-            if len(text_tables) > len(tables):
-                tables = text_tables
+        # Garble detection: if extracted text has too many non-readable characters
+        # (e.g., CID-encoded fonts), the CPU path is unreliable — fall through to OCR.
+        readable_chars = sum(1 for c in text if c.isalnum() or c.isspace() or c in '.,;:-/()')
+        total_chars = len(text.strip())
+        readable_ratio = readable_chars / max(total_chars, 1)
 
-        method = "pdfplumber+fitz (CPU)"
+        if readable_ratio < 0.6 and total_chars > 100:
+            print(f"  [PDF] Garbled text detected ({readable_ratio:.0%} readable), falling back to OCR...")
+            text, tables = _ocr_page_by_page(pdf_path)
+            method = "glm-ocr (GPU, garble-fallback)"
+        else:
+            # Supplement with text-based extraction if pdfplumber found too few
+            if len(tables) < num_pages * 0.1 and num_pages > 5:
+                text_tables = _extract_tables_from_text(text, pdf_path)
+                if len(text_tables) > len(tables):
+                    tables = text_tables
+
+            method = "pdfplumber+fitz (CPU)"
     else:
         # GPU OCR fallback — page-by-page to control memory
         print(f"  [PDF] No embedded text, using GPU OCR page-by-page...")
         text, tables = _ocr_page_by_page(pdf_path)
-        method = "deepseek-ocr (GPU, page-by-page)"
+        method = "glm-ocr (GPU, page-by-page)"
 
     dt = time.time() - t0
     file_type = "pdf"

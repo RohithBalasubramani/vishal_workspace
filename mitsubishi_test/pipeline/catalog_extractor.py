@@ -32,12 +32,26 @@ _MODEL_RULE = """- PRODUCT MODEL: The "product_model" field MUST be the most spe
   If BOTH a Cat. No./Order code AND a Type are present, use Cat. No./Order code as product_model and put Type in specs as "type_code".
 - CRITICAL: EVERY ROW in a product listing table is a SEPARATE product. If a table has columns like "Size | Rating | Type | Cat. No. | MRP" with 20 rows, extract 20 individual products — NOT one grouped product. Each row = one product with its own product_model, product_name, and specs."""
 
+_EXPANSION_RULE = """- PLACEHOLDER EXPANSION: If a product model/reference contains placeholders like "...", "__", "___" (e.g. "SR-T5 AC...V 5A", "S-T10 AC__V 1A"), these represent a variable part (usually coil voltage or rating). Look for a reference/lookup table on the same page or in the context (e.g. "Coil Ratings & Ordering Designation" with rows like AC24V=24V, AC100V=100-127V, AC200V=200-240V, DC24V=12V, etc.). EXPAND each placeholder product into MULTIPLE products — one per coil/rating variant. Example: "SR-T5 AC...V 5A" with 7 coil options → 7 products: "SR-T5 AC24V 5A", "SR-T5 AC100V 5A", ..., "SR-T5 AC500V 5A". The price stays the same for all variants of the same row. If no lookup table is found, extract the product as-is with the placeholder and add "coil_voltage" as a spec with value "varies"."""
+
 _COMPARISON_TABLE_RULE = """- COMPARISON/SPECIFICATION TABLES: If the table compares multiple products side-by-side (e.g. columns are product names like "Conceptpower DPA 500" and "MegaFlex DPA", rows are specs like "UPS frame rated power"), extract EACH column as a separate product:
   - "product_model" = the column header (product/model name)
   - "product_name" = brand + column header
   - "category" = infer from context (e.g. UPS, Meter, Controller, Drive, etc.)
   - "specs" = all row values for that column as key-value pairs (row header = spec_key, cell value = spec_value)
 - Only the product_name, product_model, and category go in the product. ALL other data (ratings, power, topology, wiring, dimensions, etc.) goes into "specs" as key-value pairs."""
+
+_MCB_MCCB_RULE = """- MCB/MCCB MANDATORY SPECS: When extracting MCB or MCCB products, you MUST extract these specs if available anywhere in the table, row headers, column headers, or page context. Use these exact key names:
+  - "poles": number of poles (1P, 2P, 3P, 4P, 3P+N, 1P+N). Extract from columns like "Poles", "No. of poles", or encoded in model (S201=1P, S202=2P, S203=3P, S204=4P)
+  - "rating": current rating in amps (e.g. "16A", "63A", "125A"). Extract from "In", "Rating", "Current", "Rated current" columns
+  - "breaking_capacity": short-circuit breaking capacity (e.g. "10kA", "36kA", "50kA"). Extract from "Icu", "kA", "Breaking capacity" columns or page headers
+  - "series": product series/family (e.g. "S200", "BHW-T10", "NF125", "XT1"). Extract from model prefix, "Series", "Type", or page heading
+  - "curve_type": trip curve for MCBs (e.g. "B-Curve", "C-Curve", "D-Curve"). Extract from "Curve", model suffix (B6=B-Curve, C16=C-Curve)
+  - "frame_size": frame size for MCCBs (e.g. "125", "250", "630"). Extract from "Frame", model prefix (NF125=125, NF250=250)
+  - "voltage": rated voltage (e.g. "AC-240V", "AC-415V", "250V-DC"). Extract from "Ue", "Voltage", "Rated voltage"
+  - "trip_unit": type of trip (e.g. "TMD", "TMA", "Thermal Magnetic", "Electronic", "LSI"). Extract from "Release", "Trip unit", "Protection"
+  - "type_code": the type designation if different from product_model (e.g. "S201-B6", "MNX 9-2P", "NF63-HV")
+  If a spec is not available in the table data, simply omit it — do NOT guess or fabricate values."""
 
 _CATEGORY_RULE = """- "category": one of MCB, MCCB, RCCB, RCBO, ACB, Isolator, Contactor, Relay, Switch, Fuse, SPD, Starter, UPS, Meter, Drive, Controller, Sensor, Enclosure, Cable, Busbar, or Other
   Examples: Pilot lights/indicators/push buttons → Switch. Cable ties/cable trays → Cable. Contact sets/spare kits/auxiliary contacts → Contactor. Shunt trips/coils/motor operators → ACB. Mounting plates/brackets/DIN rails/terminal blocks → Enclosure. Surge arresters → SPD. Timers/overload relays → Relay. Solar/PV/inverters → Drive. CTs/VTs → Sensor. Energy meters → Meter. Use "Other" ONLY if the product truly doesn't fit any category."""
@@ -56,6 +70,7 @@ For each product, extract ONLY:
 Rules:
 - Extract every distinct product or product variant
 {_MODEL_RULE}
+{_EXPANSION_RULE}
 {_COMPARISON_TABLE_RULE}
 - Return only a JSON array of objects with keys: product_name, product_model, category
 """,
@@ -75,7 +90,9 @@ Rules:
 - Extract every distinct product or product variant
 - If a column header or row label applies to all products, include it in each product's specs
 {_MODEL_RULE}
+{_MCB_MCCB_RULE}
 {_MRP_RULE}
+{_EXPANSION_RULE}
 {_COMPARISON_TABLE_RULE}
 - If data is unclear, keep what is explicit and skip what is not
 - Return only a JSON array
@@ -96,7 +113,9 @@ Rules:
 - Extract every distinct product or product variant
 - If a column header or row label applies to all products, include it in each product's specs
 {_MODEL_RULE}
+{_MCB_MCCB_RULE}
 {_MRP_RULE}
+{_EXPANSION_RULE}
 {_COMPARISON_TABLE_RULE}
 - Include EVERY available data field — do not skip any column/row that has useful data
 - If data is unclear, keep what is explicit and skip what is not
@@ -136,6 +155,43 @@ def _infer_brand_from_text(text: str) -> str | None:
         if key in lower_text:
             return value
     return None
+
+
+# ── HTML table parsing (for GLM-OCR output) ────────
+
+def _parse_html_tables_simple(html_text: str, page_num: int = 1) -> list:
+    """Parse HTML tables from GLM-OCR output into {headers, rows} format.
+
+    Handles <th>, <td>, <thead>, <tbody>, colspan, rowspan.
+    Returns list of dicts: [{"headers": [...], "rows": [[...]], "page": N}, ...]
+    """
+    import html
+    tables = []
+    # Strip thead/tbody wrappers
+    cleaned = re.sub(r'</?(?:thead|tbody|tfoot)[^>]*>', '', html_text)
+
+    for table_match in re.finditer(r'<table[^>]*>(.*?)</table>', cleaned, re.DOTALL):
+        table_html = table_match.group(1)
+        rows = []
+        for tr_match in re.finditer(r'<tr[^>]*>(.*?)</tr>', table_html, re.DOTALL):
+            cells = []
+            for cell_match in re.finditer(r'<(?:td|th)([^>]*)>(.*?)</(?:td|th)>', tr_match.group(1), re.DOTALL):
+                content = re.sub(r'<[^>]+>', '', cell_match.group(2)).strip()
+                content = html.unescape(content)
+                cells.append(content)
+            if cells:
+                rows.append(cells)
+
+        if len(rows) >= 2:
+            headers = rows[0]
+            data_rows = rows[1:]
+            # Pad rows to match header length
+            for row in data_rows:
+                while len(row) < len(headers):
+                    row.append("")
+            tables.append({"headers": headers, "rows": data_rows, "page": page_num})
+
+    return tables
 
 
 # ── LLM response parsing ────────────────────────────
@@ -210,18 +266,30 @@ def _merge_page_tables(tables: list[dict], ocr_pages: list[dict] | None = None) 
         by_page.setdefault(page, []).append(t)
 
     # Build page context lookup from OCR pages
+    # ocr_pages can be: list[dict], str, or None
     page_context = {}
     if ocr_pages:
-        for p in ocr_pages:
-            text = p.get("text", "")
-            # Extract non-table text (headings, descriptions)
-            import re as _re
-            clean = _re.sub(r'<table>.*?</table>', '', text, flags=_re.DOTALL)
-            clean = _re.sub(r'<\|[^|]+\|>[^<]*', '', clean)  # Remove OCR tags
-            clean = _re.sub(r'\!\[.*?\]\(.*?\)', '', clean)   # Remove image refs
-            lines = [l.strip() for l in clean.split('\n') if l.strip() and len(l.strip()) > 3]
-            if lines:
-                page_context[p["page"]] = " | ".join(lines[:5])
+        import re as _re
+        if isinstance(ocr_pages, str):
+            # Split raw text by page markers and build page context
+            for m in _re.finditer(r'--- Page (\d+) ---\n(.*?)(?=--- Page \d+ ---|$)', ocr_pages, _re.DOTALL):
+                page_num = int(m.group(1))
+                text = m.group(2)
+                clean = _re.sub(r'<table[^>]*>.*?</table>', '', text, flags=_re.DOTALL)
+                clean = _re.sub(r'<\|[^|]+\|>[^<]*', '', clean)
+                lines = [l.strip() for l in clean.split('\n') if l.strip() and len(l.strip()) > 3]
+                if lines:
+                    page_context[page_num] = " | ".join(lines[:5])
+        elif isinstance(ocr_pages, list):
+            for p in ocr_pages:
+                if isinstance(p, dict):
+                    text = p.get("text", "")
+                    clean = _re.sub(r'<table[^>]*>.*?</table>', '', text, flags=_re.DOTALL)
+                    clean = _re.sub(r'<\|[^|]+\|>[^<]*', '', clean)
+                    clean = _re.sub(r'\!\[.*?\]\(.*?\)', '', clean)
+                    lines = [l.strip() for l in clean.split('\n') if l.strip() and len(l.strip()) > 3]
+                    if lines:
+                        page_context[p.get("page", 0)] = " | ".join(lines[:5])
 
     merged = []
     for page_num in sorted(by_page.keys()):
@@ -334,7 +402,7 @@ Extract all products as a JSON array:"""
                     {"role": "system", "content": "You extract structured product data from electrical catalogs. Output valid JSON only."},
                     {"role": "user", "content": full_prompt},
                 ],
-                "max_tokens": 16384,
+                "max_tokens": 8192,
                 "temperature": 0.05,
                 "chat_template_kwargs": {"enable_thinking": False},
             },
@@ -353,18 +421,19 @@ Extract all products as a JSON array:"""
 
 
 def _reclassify_other(name: str, model: str, specs: dict) -> str:
-    """Reclassify products the LLM tagged as 'Other' using keyword rules.
+    """Reclassify products the LLM tagged as 'Other' using keyword + spec rules.
 
-    Catches: pilot lights, cable ties, sockets, contact kits, interlocks,
-    mounting hardware, shunt releases, etc. that the LLM couldn't map to
-    the 20 standard categories.
+    Two-pass classification:
+    1. Keyword matching on product name/model/spec values
+    2. Spec-key inference (e.g. 'breaking_capacity' → MCCB, 'coil_voltage' → Contactor)
     """
     text = f"{name} {model} {' '.join(str(v) for v in specs.values())}".lower()
+    spec_keys = {k.lower().replace(" ", "_") for k in specs.keys()}
 
-    rules = [
-        # (keywords_any_of, category)
+    # Pass 1: Keyword rules on name/model/spec values
+    keyword_rules = [
         (["pilot light", "indicator light", "signal lamp", "led indicator"], "Switch"),
-        (["cable tie", "ty-fast", "cable management", "cable tray"], "Cable"),
+        (["cable tie", "ty-fast", "cable management", "cable tray", "cable lug"], "Cable"),
         (["contact set", "contact kit", "spare contact", "auxiliary contact",
          "aux contact", "trip alarm"], "Contactor"),
         (["shunt release", "shunt trip", "undervoltage release", "closing coil",
@@ -373,6 +442,7 @@ def _reclassify_other(name: str, model: str, specs: dict) -> str:
         (["interlock", "racking", "padlock", "lock hasp", "locking"], "Enclosure"),
         (["mounting", "bracket", "din rail", "mounting plate", "spreader terminal",
          "terminal block", "clamp", "busbar clamp"], "Enclosure"),
+        (["handle", "cover", "skeleton", "plate", "device", "adaptor"], "Enclosure"),
         (["fuse", "fuse base", "fuse link", "fuse holder", "fuse kit"], "Fuse"),
         (["surge", "surge arrester", "spd", "lightning"], "SPD"),
         (["timer", "time relay", "time switch", "programmable"], "Relay"),
@@ -381,13 +451,27 @@ def _reclassify_other(name: str, model: str, specs: dict) -> str:
         (["capacitor", "power factor", "apfc"], "Controller"),
         (["energy meter", "kwh meter", "multifunction meter"], "Meter"),
         (["push button", "selector switch", "mushroom head"], "Switch"),
-        (["current transformer", "ct", "voltage transformer"], "Sensor"),
+        (["current transformer", "ct ", "voltage transformer"], "Sensor"),
         (["recloser", "auto-reclosing", "reclosing unit"], "MCB"),
     ]
 
-    for keywords, category in rules:
+    for keywords, category in keyword_rules:
         if any(kw in text for kw in keywords):
             return category
+
+    # Pass 2: Spec-key inference — if product has characteristic spec keys
+    spec_rules = [
+        ({"breaking_capacity", "icu", "ics", "frame", "frame_size"}, "MCCB"),
+        ({"tripping_characteristic", "curve_type"}, "MCB"),
+        ({"coil_voltage", "contact_rating", "ac1_duty_amps", "ac3_duty_amps"}, "Contactor"),
+        ({"sensitivity", "residual_current"}, "RCCB"),
+        ({"operating_voltage", "aux_supply"}, "Relay"),
+    ]
+
+    for required_keys, category in spec_rules:
+        if spec_keys & required_keys:
+            return category
+
     return "Other"
 
 
@@ -454,7 +538,12 @@ def extract_from_tables(tables, filename, brand_hint=None, level="detailed",
     # Merge related tables from the same page (e.g. specs + ordering codes)
     valid_tables = _merge_page_tables(valid_tables, ocr_pages)
 
-    print(f"  [Extract] {len(valid_tables)} tables (after merge) from {filename}")
+    # Expand voltage/designation variants (e.g. AC__V → AC24V, AC48V, ...)
+    from .voltage_expander import expand_tables as _expand_tables
+    tables_before_expand = list(valid_tables)  # Keep original for post-LLM expansion
+    valid_tables = _expand_tables(valid_tables)
+
+    print(f"  [Extract] {len(valid_tables)} tables (after merge+expand) from {filename}")
 
     # Build batches — group tables until we hit token limit
     batches = []
@@ -517,6 +606,45 @@ def extract_from_tables(tables, filename, brand_hint=None, level="detailed",
             print(f"  [Extract] {msg}")
             if progress_cb:
                 progress_cb(completed, len(batches), len(all_products))
+
+    # Fallback: if table extraction produced 0 products, try raw text extraction.
+    # This handles scanned PDFs, selection guides, and non-standard table layouts
+    # where the table parser can't structure the data but the LLM can read raw text.
+    if not all_products and ocr_pages:
+        print(f"  [Extract] 0 products from tables — trying raw text fallback...")
+        raw_text = ""
+        if isinstance(ocr_pages, list):
+            for p in ocr_pages:
+                raw_text += (p.get("text", "") if isinstance(p, dict) else str(p)) + "\n"
+        elif isinstance(ocr_pages, str):
+            raw_text = ocr_pages
+
+        if raw_text and len(raw_text) > 200:
+            # Split into ~5000 char chunks (fits in 8K context with prompt)
+            chunks = []
+            for i in range(0, len(raw_text), 5000):
+                chunk = raw_text[i:i+5000]
+                if len(chunk.strip()) > 200:
+                    chunks.append(chunk)
+
+            for ci, chunk in enumerate(chunks):
+                prompt = f"Source document: {filename}\n\n{chunk}"
+                try:
+                    items = _call_vllm(prompt, level_prompt, brand_hint, categories=categories)
+                    products = _items_to_products(items, brand_hint)
+                    if products:
+                        print(f"  [Extract] Text chunk {ci+1}/{len(chunks)}: {len(products)} products")
+                        all_products.extend(products)
+                except Exception as e:
+                    print(f"  [Extract] Text chunk {ci+1} error: {e}")
+
+            if all_products:
+                print(f"  [Extract] Text fallback: {len(all_products)} total products")
+
+    # Post-LLM expansion: expand any remaining voltage placeholders in extracted products
+    # Use tables_before_expand which still contains the lookup table
+    from .voltage_expander import expand_extracted_products as _expand_products
+    all_products = _expand_products(all_products, tables_before_expand)
 
     # Fill missing brands — cascade: brand_hint → product text → filename → catalogue
     catalog_brand = _auto_brand(filename) or brand_hint
@@ -724,7 +852,8 @@ def process_catalog(file_path, brand_hint=None, level="detailed", categories=Non
 
     text, tables, dt, method, file_type, num_pages = pdf_process(abs_path)
 
-    products = extract_from_tables(tables, filename, brand_hint, level=level, categories=categories)
+    products = extract_from_tables(tables, filename, brand_hint, level=level,
+                                   categories=categories, ocr_pages=text)
 
     try:
         inserted, skipped = save_products(products)
